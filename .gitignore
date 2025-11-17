@@ -2,3 +2,4 @@ numbers/
 node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
+snapshot.json

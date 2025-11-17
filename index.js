@@ -2,7 +2,6 @@ import qrcode from "qrcode-terminal";
 import fs from "fs/promises";
 
 import pkg from "whatsapp-web.js";
-
 const { Client, LocalAuth } = pkg;
 
 const client = new Client({
@@ -10,7 +9,7 @@ const client = new Client({
     clientId: "main-session",
   }),
   puppeteer: {
-    headless: false,
+    headless:true,
   },
 });
 
@@ -29,6 +28,8 @@ const prefixes = [
   "056",
 ];
 
+const snapshot = JSON.parse(await fs.readFile("./snapshot.json", "utf8"));
+
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -39,10 +40,10 @@ client.on("qr", (qr) => {
 });
 
 client.on("ready", async () => {
-  for (const prefix of prefixes) {
-
-    for (let i = 0; i < 10_000_000; i++) {
-      const number = `233${prefix.replace("0", "")}${String(i).padStart(7, "0")}`;
+  for (let i = snapshot.prefixIndex; i < prefixes.length; i++) {
+    const prefix = prefixes[i];
+    for (let j = snapshot.numberIndex; j < 10_000_000; j++) {
+      const number = `233${prefix.replace("0", "")}${String(j).padStart(7, "0")}`;
 
       try {
         const isRegistered = await client.isRegisteredUser(number);
@@ -70,12 +71,17 @@ client.on("ready", async () => {
                 JSON.stringify(numbers, null, 2),
                 "utf8",
               );
+              await fs.writeFile(
+                "snapshot.json",
+                JSON.stringify({ prefixIndex: i, numberIndex: j }, null, 2),
+                "utf8",
+              );
             }
           } catch (fileError) {
             console.error(`Error updating ${filePath}:`, fileError);
           }
         }
-        await sleep(1000*5);
+        await sleep(1000 * 5);
       } catch (error) {
         console.log(error);
       }
