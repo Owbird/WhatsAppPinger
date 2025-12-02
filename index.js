@@ -9,8 +9,8 @@ const client = new Client({
     clientId: "main-session",
   }),
   puppeteer: {
-    headless:true,
-    args: ['--no-sandbox'],
+    headless: true,
+    args: ["--no-sandbox"],
   },
 });
 
@@ -31,8 +31,8 @@ const prefixes = [
 
 const snapshot = JSON.parse(await fs.readFile("./snapshot.json", "utf8"));
 
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(seconds) {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 client.on("qr", (qr) => {
@@ -41,12 +41,14 @@ client.on("qr", (qr) => {
 });
 
 client.on("ready", async () => {
+  console.log("Client is ready!")
   for (let i = snapshot.prefixIndex; i < prefixes.length; i++) {
     const prefix = prefixes[i];
     for (let j = snapshot.numberIndex; j < 10_000_000; j++) {
       const number = `233${prefix.replace("0", "")}${String(j).padStart(7, "0")}`;
 
       try {
+        console.log(`Checking number ${number}...`)
         const isRegistered = await client.isRegisteredUser(number);
 
         console.log(
@@ -82,7 +84,12 @@ client.on("ready", async () => {
             console.error(`Error updating ${filePath}:`, fileError);
           }
         }
-        await sleep(1000 * 5);
+
+        for (let i = 1800; i > 0; i--) {
+          console.log(`${i}s till next run...`);
+          await sleep(1);
+        }
+
       } catch (error) {
         console.log(error);
       }
@@ -99,3 +106,4 @@ client.on("message", (msg) => {
 client.initialize();
 
 console.log("[+] Starting WhatsApp Pinger...");
+console.log(`Using snapshot ${JSON.stringify(snapshot)}`)
