@@ -2,6 +2,7 @@ import qrcode from "qrcode-terminal";
 import fs from "fs/promises";
 
 import pkg from "whatsapp-web.js";
+import chalk from "chalk";
 const { Client, LocalAuth } = pkg;
 
 const client = new Client({
@@ -31,29 +32,44 @@ const prefixes = [
 
 const snapshot = JSON.parse(await fs.readFile("./snapshot.json", "utf8"));
 
+function log(value) {
+  const now = new Date().toLocaleString("en-US", {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  console.log(chalk.greenBright(`[+] [${now}]`, value));
+}
+
 async function sleep(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 client.on("qr", (qr) => {
-  console.log("Scan this QR:");
+  log("Scan this QR:");
   qrcode.generate(qr, { small: true });
 });
 
 client.on("ready", async () => {
-  console.log("Client is ready!")
+  log("Client is ready!");
   for (let i = snapshot.prefixIndex; i < prefixes.length; i++) {
     const prefix = prefixes[i];
     for (let j = snapshot.numberIndex; j < 10_000_000; j++) {
       const number = `233${prefix.replace("0", "")}${String(j).padStart(7, "0")}`;
 
       try {
-        console.log(`Checking number ${number}...`)
+        log(`Checking number ${number}...`);
         const isRegistered = await client.isRegisteredUser(number);
 
-        console.log(
+        log(
           `[${isRegistered ? "✅" : "❌"}] ${number} is ${isRegistered ? "registered" : "not registered"}`,
         );
+
         if (isRegistered) {
           const filePath = "numbers/registered.json";
           try {
@@ -74,22 +90,20 @@ client.on("ready", async () => {
                 JSON.stringify(numbers, null, 2),
                 "utf8",
               );
-              await fs.writeFile(
-                "snapshot.json",
-                JSON.stringify({ prefixIndex: i, numberIndex: j }, null, 2),
-                "utf8",
-              );
             }
           } catch (fileError) {
             console.error(`Error updating ${filePath}:`, fileError);
           }
         }
 
-        for (let i = 1800; i > 0; i--) {
-          console.log(`${i}s till next run...`);
-          await sleep(1);
-        }
+        await fs.writeFile(
+          "snapshot.json",
+          JSON.stringify({ prefixIndex: i, numberIndex: j }, null, 2),
+          "utf8",
+        );
 
+        log(`Sleeping till next run...`);
+        await sleep(1800);
       } catch (error) {
         console.log(error);
       }
@@ -105,5 +119,5 @@ client.on("message", (msg) => {
 
 client.initialize();
 
-console.log("[+] Starting WhatsApp Pinger...");
-console.log(`Using snapshot ${JSON.stringify(snapshot)}`)
+log("Starting WhatsApp Pinger...");
+log(`Using snapshot ${JSON.stringify(snapshot)}`);
