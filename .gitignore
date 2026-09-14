@@ -3,4 +3,4 @@ node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
 snapshot.json
-sample.json
+study-state.json
