@@ -5,7 +5,7 @@ import pkg from "whatsapp-web.js";
 import chalk from "chalk";
 
 import { loadStore, saveStore } from "./store.js";
-import { TIERS, runBatch } from "./tiers.js";
+import { TIERS, runBatch, emptyLatency } from "./tiers.js";
 
 const { Client, LocalAuth } = pkg;
 const STORE_PATH = "./study-state.json";
@@ -37,6 +37,7 @@ function parseArgs(argv) {
 async function runRQ1(client, store, args, getHalt) {
   const tiers = args.t4 ? TIERS : TIERS.filter((t) => t.id !== "T4");
   store.rq1.tierProgress ??= {};
+  store.rq1.latency ??= {};
 
   // Persists a query-count checkpoint after each query — no number itself,
   // just how many of this tier/recovery batch are done — so a restart
@@ -55,10 +56,11 @@ async function runRQ1(client, store, args, getHalt) {
     }
 
     const startIndex = store.rq1.tierProgress[tier.id] ?? 0;
+    store.rq1.latency[tier.id] ??= emptyLatency();
     log(startIndex > 0
       ? `Resuming ${tier.id} at query ${startIndex + 1}/${tier.count}`
       : `Starting ${tier.id} (${tier.count} queries)`);
-    const result = await runBatch(client, tier, getHalt, sleep, log, checkpoint(tier.id), startIndex);
+    const result = await runBatch(client, tier, getHalt, sleep, log, checkpoint(tier.id), startIndex, store.rq1.latency[tier.id]);
 
     if (result.halted) {
       store.rq1.tierStatus[tier.id] = "halted";

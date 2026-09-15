@@ -76,7 +76,11 @@ Data minimization is structural, not post-hoc. The persistent state
 
 - per-tier status (`complete` / `halted`) and an in-flight query-count checkpoint;
 - an event log of halt/recovery signals (`disconnect`, `auth_failure`, `error`)
-  with the tier, phase, and query index at which they occurred.
+  with the tier, phase, and query index at which they occurred;
+- per-tier response-latency summaries — count, min, max, sum, sum-of-squares
+  (→ mean and spread), plus a 10-segment within-tier trend so a latency climb
+  (soft throttling) is visible. Only these running aggregates are kept, never a
+  per-query series.
 
 No phone number, no registration status, no profile data, and no list of
 WhatsApp-associated numbers is ever written to disk.

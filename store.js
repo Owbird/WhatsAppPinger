@@ -1,7 +1,11 @@
 import fs from "fs/promises";
 
 export const emptyStore = () => ({
-  rq1: { tierStatus: {}, tierProgress: {} }, // tierProgress: query count checkpoint for a tier still in flight
+  rq1: {
+    tierStatus: {}, // per-tier: "complete" | "halted"
+    tierProgress: {}, // query count checkpoint for a tier still in flight
+    latency: {}, // per-tier response-latency summary (see tiers.emptyLatency)
+  },
   events: [], // halt/recovery log for the RQ1 tier runs, tagged by scope
 });
 

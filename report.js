@@ -26,6 +26,23 @@ function pct(x) {
   return x === null ? "-" : `${(x * 100).toFixed(1)}%`;
 }
 
+function ms(x) {
+  return x === null || x === undefined ? "-" : `${Math.round(x)}ms`;
+}
+
+// Collapse a tier's latency accumulator into the figures RQ1a/RQ1b read from.
+// drift = last-segment mean minus first-segment mean: a large positive drift
+// with no halt is the fingerprint of soft throttling (the account keeps
+// answering, but slower and slower over the course of the tier).
+function latencyStats(lat) {
+  if (!lat || lat.n === 0) return null;
+  const mean = lat.sum / lat.n;
+  const sd = Math.sqrt(Math.max(0, lat.sumSq / lat.n - mean * mean));
+  const segMeans = lat.segments.filter((s) => s.n > 0).map((s) => s.sum / s.n);
+  const drift = segMeans.length > 1 ? segMeans.at(-1) - segMeans[0] : null;
+  return { mean, sd, min: lat.min, max: lat.max, drift };
+}
+
 function reportRQ1(store) {
   console.log("\n=== RQ1 — defense response by workload tier ===");
 
@@ -50,6 +67,14 @@ function reportRQ1(store) {
     let line = `  ${tier.id}: ${status}, ${queriesRun}/${tier.count} queries (${rate})`;
     if (runHalt) line += `, halted: ${runHalt.signal}`;
     if (recoveryHalt) line += `, recovery failed: ${recoveryHalt.signal}`;
+
+    const lat = latencyStats(store.rq1.latency?.[tier.id]);
+    if (lat) {
+      line += `\n      latency: mean ${ms(lat.mean)} ±${ms(lat.sd)} (min ${ms(lat.min)}, max ${ms(lat.max)})`;
+      if (lat.drift !== null) {
+        line += `, drift ${lat.drift >= 0 ? "+" : ""}${ms(lat.drift)} across tier`;
+      }
+    }
     console.log(line);
 
     if (runHalt || recoveryHalt) restricted++;
