@@ -1,9 +1,8 @@
 import fs from "fs/promises";
 
 export const emptyStore = () => ({
-  rq2: { done: false, sample: null, rows: [] },
   rq1: { tierStatus: {}, tierProgress: {} }, // tierProgress: query count checkpoint for a tier still in flight
-  events: [], // shared halt/recovery log for both rq2 and rq1, tagged by scope
+  events: [], // halt/recovery log for the RQ1 tier runs, tagged by scope
 });
 
 export async function loadStore(path) {

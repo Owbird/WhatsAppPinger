@@ -1,6 +1,22 @@
-import { GHANA_PREFIXES } from "./sample-frame.js";
+// Ghana's twelve mobile numbering prefixes. Used only as the sampling
+// context the tier workload draws candidate numbers from (randomNumber
+// below) — the registration status those numbers return is never recorded.
+export const GHANA_PREFIXES = [
+  "020",
+  "050",
+  "023",
+  "024",
+  "025",
+  "053",
+  "054",
+  "055",
+  "059",
+  "026",
+  "027",
+  "056",
+];
 
-// Fixed, predetermined counts — not open-ended loops. 
+// Fixed, predetermined counts — not open-ended loops.
 export const TIERS = [
   { id: "T0", count: 50, intervalMs: 5_000 },
   { id: "T1", count: 100, intervalMs: 1_800_000 },

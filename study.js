@@ -1,10 +1,9 @@
-// Usage: node study.js [--n 50] [--seed 42] [--rq2-interval 1800] [--t4]
+// Usage: node study.js [--t4]
 
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import chalk from "chalk";
 
-import { generateSample } from "./sample-frame.js";
 import { loadStore, saveStore } from "./store.js";
 import { TIERS, runBatch } from "./tiers.js";
 
@@ -29,64 +28,7 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const args = { n: 50, seed: undefined, t4: argv.includes("--t4"), rq2IntervalMs: 1_800_000 };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--n") args.n = Number(argv[++i]);
-    else if (argv[i] === "--seed") args.seed = Number(argv[++i]);
-    else if (argv[i] === "--rq2-interval") args.rq2IntervalMs = Number(argv[++i]) * 1000;
-  }
-  return args;
-}
-
-// Resumable: the pending sample is persisted and shrinks by one entry each
-// time a number is tallied, so a restart picks up where it left off instead
-// of drawing a new sample. A number only ever exists on disk until it's
-// been tallied — never after.
-async function runRQ2(client, store, args, getHalt) {
-  if (store.rq2.done) {
-    log("RQ2 already complete, moving to RQ1");
-    return;
-  }
-
-  if (!store.rq2.sample) {
-    store.rq2.sample = generateSample({ n: args.n, seed: args.seed });
-    store.rq2.rows = [];
-    await saveStore(STORE_PATH, store);
-  }
-
-  const rows = new Map(store.rq2.rows.map((row) => [row.prefix, row]));
-
-  while (store.rq2.sample.length > 0) {
-    if (getHalt()) {
-      store.events.push({ scope: "rq2", ...getHalt(), timestamp: new Date().toISOString() });
-      await saveStore(STORE_PATH, store);
-      log(`RQ2 halted: ${getHalt().signal}`);
-      return;
-    }
-
-    const { prefix, number } = store.rq2.sample[0];
-    const row = rows.get(prefix) ?? { prefix, sampled: 0, registered: 0 };
-    rows.set(prefix, row);
-
-    try {
-      const isRegistered = await client.isRegisteredUser(number);
-      row.sampled += 1;
-      if (isRegistered) row.registered += 1;
-    } catch (error) {
-      console.error(error); // one failed check doesn't halt or retry RQ2 — move on
-    }
-
-    store.rq2.sample.shift(); // tallied or not, it's not retained past this point
-    store.rq2.rows = [...rows.values()];
-    await saveStore(STORE_PATH, store);
-    log(`[RQ2 ${prefix}] ${row.sampled}/${args.n} (registered so far: ${row.registered}), ${store.rq2.sample.length} left overall`);
-    await sleep(args.rq2IntervalMs);
-  }
-
-  store.rq2.done = true;
-  store.rq2.sample = null;
-  await saveStore(STORE_PATH, store);
-  log("RQ2 complete");
+  return { t4: argv.includes("--t4") };
 }
 
 // T1 only starts if T0 finished clean, T2 only if T1's recovery check
@@ -180,8 +122,7 @@ async function main() {
   client.once("ready", async () => {
     log("Client is ready!");
 
-    await runRQ2(client, store, args, () => halted);
-    if (!halted) await runRQ1(client, store, args, () => halted);
+    await runRQ1(client, store, args, () => halted);
 
     log(`Run finished. State in ${STORE_PATH}`);
     await client.destroy();

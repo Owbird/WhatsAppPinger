@@ -1,5 +1,5 @@
 // computes final descriptive stats
-// from whatever store.js has accumulated for RQ1 and RQ2. Never touches
+// from whatever store.js has accumulated for RQ1. Never touches
 // WhatsApp, safe to run while study.js is still going.
 //
 // Usage: node report.js [--store study-state.json]
@@ -22,43 +22,8 @@ async function safeLoadStore(path, retries = 5) {
   }
 }
 
-// Wilson score interval — holds up better than the normal approximation for
-// small n or a proportion near 0/1, both likely here.
-function wilsonInterval(successes, n, z = 1.96) {
-  if (n === 0) return { low: null, high: null };
-  const p = successes / n;
-  const denom = 1 + (z * z) / n;
-  const center = p + (z * z) / (2 * n);
-  const margin = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
-  return {
-    low: Math.max(0, (center - margin) / denom),
-    high: Math.min(1, (center + margin) / denom),
-  };
-}
-
 function pct(x) {
   return x === null ? "-" : `${(x * 100).toFixed(1)}%`;
-}
-
-function reportRQ2(store) {
-  const { rows, done, sample } = store.rq2;
-
-  console.log("\n=== RQ2 — registration prevalence by numbering range ===");
-  console.log(done ? "(complete)" : `(in progress, ${sample?.length ?? "?"} numbers left)`);
-
-  for (const row of rows) {
-    const p = row.sampled ? row.registered / row.sampled : 0;
-    const ci = wilsonInterval(row.registered, row.sampled);
-    console.log(`  ${row.prefix}: ${row.registered}/${row.sampled} (${pct(p)}), 95% CI [${pct(ci.low)}, ${pct(ci.high)}]`);
-  }
-
-  const totalSampled = rows.reduce((sum, r) => sum + r.sampled, 0);
-  const totalRegistered = rows.reduce((sum, r) => sum + r.registered, 0);
-  if (totalSampled > 0) {
-    const overallP = totalRegistered / totalSampled;
-    const overallCi = wilsonInterval(totalRegistered, totalSampled);
-    console.log(`  Overall: ${totalRegistered}/${totalSampled} (${pct(overallP)}), 95% CI [${pct(overallCi.low)}, ${pct(overallCi.high)}]`);
-  }
 }
 
 function reportRQ1(store) {
@@ -110,7 +75,6 @@ async function main() {
 
   const store = await safeLoadStore(storePath);
 
-  reportRQ2(store);
   reportRQ1(store);
   reportEvents(store);
 }
