@@ -94,6 +94,15 @@ async function runRQ2(client, store, args, getHalt) {
 // right tier instead of redoing earlier ones.
 async function runRQ1(client, store, args, getHalt) {
   const tiers = args.t4 ? TIERS : TIERS.filter((t) => t.id !== "T4");
+  store.rq1.tierProgress ??= {};
+
+  // Persists a query-count checkpoint after each query — no number itself,
+  // just how many of this tier/recovery batch are done — so a restart
+  // resumes mid-batch instead of from 0.
+  const checkpoint = (id) => async (count) => {
+    store.rq1.tierProgress[id] = count;
+    await saveStore(STORE_PATH, store);
+  };
 
   for (const tier of tiers) {
     const status = store.rq1.tierStatus[tier.id];
@@ -103,8 +112,11 @@ async function runRQ1(client, store, args, getHalt) {
       return;
     }
 
-    log(`Starting ${tier.id} (${tier.count} queries)`);
-    const result = await runBatch(client, tier, getHalt, sleep, log);
+    const startIndex = store.rq1.tierProgress[tier.id] ?? 0;
+    log(startIndex > 0
+      ? `Resuming ${tier.id} at query ${startIndex + 1}/${tier.count}`
+      : `Starting ${tier.id} (${tier.count} queries)`);
+    const result = await runBatch(client, tier, getHalt, sleep, log, checkpoint(tier.id), startIndex);
 
     if (result.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
@@ -114,9 +126,12 @@ async function runRQ1(client, store, args, getHalt) {
       return;
     }
 
+    delete store.rq1.tierProgress[tier.id];
+
     log(`${tier.id} complete, running recovery check`);
     const recoveryTier = { id: `${tier.id}-recovery`, count: TIERS[0].count, intervalMs: TIERS[0].intervalMs };
-    const recovery = await runBatch(client, recoveryTier, getHalt, sleep, log);
+    const recoveryStart = store.rq1.tierProgress[recoveryTier.id] ?? 0;
+    const recovery = await runBatch(client, recoveryTier, getHalt, sleep, log, checkpoint(recoveryTier.id), recoveryStart);
 
     if (recovery.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
@@ -126,6 +141,7 @@ async function runRQ1(client, store, args, getHalt) {
       return;
     }
 
+    delete store.rq1.tierProgress[recoveryTier.id];
     store.rq1.tierStatus[tier.id] = "complete";
     await saveStore(STORE_PATH, store);
     log(`Recovery check passed, advancing past ${tier.id}`);

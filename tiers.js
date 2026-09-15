@@ -24,8 +24,11 @@ export function classifySignal(error) {
 
 // Halts immediately on any thrown error or externally-set halt signal (a
 // client-level disconnect/auth-failure) — no catch-and-continue.
-export async function runBatch(client, tier, getHalt, sleep, log) {
-  for (let i = 0; i < tier.count; i++) {
+// startIndex lets a resumed tier pick up mid-batch instead of from 0;
+// onProgress is called with the new completed count after each query so the
+// caller can persist a checkpoint (no number itself is ever passed back).
+export async function runBatch(client, tier, getHalt, sleep, log, onProgress, startIndex = 0) {
+  for (let i = startIndex; i < tier.count; i++) {
     if (getHalt()) return { halted: getHalt(), index: i };
 
     try {
@@ -39,6 +42,7 @@ export async function runBatch(client, tier, getHalt, sleep, log) {
 
     if (getHalt()) return { halted: getHalt(), index: i };
     log?.(`[${tier.id}] ${i + 1}/${tier.count} queries`);
+    await onProgress?.(i + 1);
     await sleep(tier.intervalMs);
   }
   return { halted: null, index: tier.count };

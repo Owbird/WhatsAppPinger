@@ -75,7 +75,11 @@ function reportRQ1(store) {
     const runHalt = store.events.find((e) => e.scope === "rq1" && e.tier === tier.id && e.phase === "run");
     const recoveryHalt = store.events.find((e) => e.scope === "rq1" && e.tier === tier.id && e.phase === "recovery");
 
-    const queriesRun = status === "complete" ? tier.count : runHalt ? runHalt.index : "in progress";
+    const queriesRun = status === "complete"
+      ? tier.count
+      : runHalt
+        ? runHalt.index
+        : (store.rq1.tierProgress?.[tier.id] ?? "in progress");
     const rate = typeof queriesRun === "number" ? pct(queriesRun / tier.count) : "-";
 
     let line = `  ${tier.id}: ${status}, ${queriesRun}/${tier.count} queries (${rate})`;
