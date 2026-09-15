@@ -108,7 +108,7 @@ async function runRQ1(client, store, args, getHalt) {
 
     if (result.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
-      store.events.push({ scope: "rq1", tier: tier.id, phase: "run", ...result.halted, timestamp: new Date().toISOString() });
+      store.events.push({ scope: "rq1", tier: tier.id, phase: "run", index: result.index, ...result.halted, timestamp: new Date().toISOString() });
       await saveStore(STORE_PATH, store);
       log(`Halted during ${tier.id} at query ${result.index}: ${result.halted.signal}`);
       return;
@@ -120,7 +120,7 @@ async function runRQ1(client, store, args, getHalt) {
 
     if (recovery.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
-      store.events.push({ scope: "rq1", tier: tier.id, phase: "recovery", ...recovery.halted, timestamp: new Date().toISOString() });
+      store.events.push({ scope: "rq1", tier: tier.id, phase: "recovery", index: recovery.index, ...recovery.halted, timestamp: new Date().toISOString() });
       await saveStore(STORE_PATH, store);
       log(`Recovery check failed after ${tier.id}: ${recovery.halted.signal}. ${tier.id} is the ceiling.`);
       return;
@@ -158,7 +158,10 @@ async function main() {
   client.on("authenticated", () => log("Authenticated"));
   client.on("change_state", (state) => log(`State changed: ${state}`));
 
-  client.on("ready", async () => {
+  // .once, not .on: `ready` fires again after every reconnect (e.g. a
+  // forced relogin), and re-entering the pipeline on a second firing would
+  // race the still-in-flight first run against the same store/sample.
+  client.once("ready", async () => {
     log("Client is ready!");
 
     await runRQ2(client, store, args, () => halted);
