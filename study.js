@@ -104,7 +104,7 @@ async function runRQ1(client, store, args, getHalt) {
     }
 
     log(`Starting ${tier.id} (${tier.count} queries)`);
-    const result = await runBatch(client, tier, getHalt, sleep);
+    const result = await runBatch(client, tier, getHalt, sleep, log);
 
     if (result.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
@@ -116,7 +116,7 @@ async function runRQ1(client, store, args, getHalt) {
 
     log(`${tier.id} complete, running recovery check`);
     const recoveryTier = { id: `${tier.id}-recovery`, count: TIERS[0].count, intervalMs: TIERS[0].intervalMs };
-    const recovery = await runBatch(client, recoveryTier, getHalt, sleep);
+    const recovery = await runBatch(client, recoveryTier, getHalt, sleep, log);
 
     if (recovery.halted) {
       store.rq1.tierStatus[tier.id] = "halted";
