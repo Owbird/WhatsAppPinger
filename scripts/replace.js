@@ -1,6 +1,6 @@
 import {loadExperiment,canonical,fingerprint} from '../lib/experiment.js';
 import {inspectAccount,resolveOutcome,prepareReplacement} from '../lib/repo.js';
-import {checkpointPath,loadRunCheckpoint,reconcile,ensureCheckpoint} from '../lib/store.js';
+import {checkpointPath,dispositionPath,loadRunCheckpoint,reconcile,ensureCheckpoint} from '../lib/store.js';
 import {resolveHostLabel} from '../lib/config.js';
 import {softwareMetadata} from '../lib/software.js';
 import {query,closePool} from '../lib/db.js';
@@ -35,12 +35,12 @@ try{
     if(options['--adjudicate']){
       await resolveOutcome(accountId,'technical_failure',reason,experiment,{runId,host,expectedRevision:check.state.revision});
       check=await inspectAccount(accountId,host,experiment,runId);
-      const file=checkpointPath(accountId,dataDir,'prospective',runId);
+      const file=dispositionPath(accountId,dataDir,runId);
       await ensureCheckpoint(file,check.state,experiment);
       console.log(JSON.stringify({accountId,host,originalRunId:runId,replacementRunId:null,status:check.state.status,reason,originalCheckpoint:found.file,checkpoint:file,executionPermitted:false},null,2));
     }else{
       if(check.state.status!=='technical_failure')throw new Error('Adjudicate the original run as technical_failure first');
-      await ensureCheckpoint(checkpointPath(accountId,dataDir,'prospective',runId),check.state,experiment);
+      await ensureCheckpoint(dispositionPath(accountId,dataDir,runId),check.state,experiment);
       const result=await prepareReplacement({accountId,host,sourceRunId:runId,experiment,reasonCode:reason,researchAuthorization:options['--research-authorization'],platformAuthorization:options['--platform-authorization'],software:await softwareMetadata()});
       if(result.run.status!=='enrolled'||result.state?.revision!==0)throw new Error('Replacement already started; no preparation file will be overwritten');
       const file=checkpointPath(accountId,dataDir,'prospective',result.run.id);
