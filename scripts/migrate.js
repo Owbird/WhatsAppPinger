@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-// Minimal migration runner. No external dependency beyond `pg`.
-//
-//   node scripts/migrate.js
-//
-// Tracks applied migrations in schema_migrations and runs the rest in
-// filename order, each inside its own transaction.
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
@@ -13,7 +7,7 @@ import { getPool, closePool } from "../lib/db.js";
 
 const DEFAULT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
-export async function runMigrations({ dir = DEFAULT_DIR, log = console.log } = {}) {
+export async function runMigrations({ dir = DEFAULT_DIR, log = console.log, through = null } = {}) {
   const pool = getPool();
   await pool.query(
     `create table if not exists schema_migrations (
@@ -22,7 +16,7 @@ export async function runMigrations({ dir = DEFAULT_DIR, log = console.log } = {
      )`
   );
 
-  const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
+  const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".sql") && (!through || f <= through)).sort();
   const applied = new Set(
     (await pool.query("select filename from schema_migrations")).rows.map((r) => r.filename)
   );

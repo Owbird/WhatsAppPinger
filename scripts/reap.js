@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-// Usage: node scripts/reap.js [--ttl-ms 120000] [--dry-run]
-//
-// Marks running accounts whose heartbeat has lapsed as host_lost: the machine
-// is asleep, offline or crashed, which is not the same as a WhatsApp-level
-// halt. Never touches WhatsApp.
 
 import { reapStaleLeases } from "../lib/repo.js";
 import { closePool } from "../lib/db.js";

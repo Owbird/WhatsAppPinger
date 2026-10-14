@@ -1,21 +1,4 @@
 #!/usr/bin/env node
-// Interactive enrollment for one study account. Run from the project root:
-//
-//   node scripts/enroll.js [--data-dir ./data] [--host vps|local]
-//   node scripts/enroll.js --dry-run --fake-wid 233501234567@c.us
-//
-// Asks for the account's covariates, links the phone by QR (printing the last
-// two digits so you can confirm it's the right one), refuses a number that is
-// already enrolled, then writes the account to Postgres with a keyed identity
-// hash and no arm. It runs no workload, and nothing is written unless every
-// step succeeds.
-//
-// The global one-phone-one-account rule is the database uniqueness constraint
-// on identity_hash; the check here only exists to give a friendlier message.
-//
-// --dry-run skips the browser and the database, and uses --fake-wid as the
-// linked number; it writes nothing and creates no session. (It does create
-// config/identity.secret if absent, since hashing needs the key.)
 
 import os from "os";
 import fs from "fs/promises";
@@ -37,10 +20,6 @@ export class Cancelled extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers (exported so they can be tested without a terminal)
-// ---------------------------------------------------------------------------
-
 export function nextFreeId(accounts = []) {
   const nums = accounts
     .map((a) => /^A(\d+)$/.exec(a.id ?? a))
@@ -50,7 +29,7 @@ export function nextFreeId(accounts = []) {
   return `A${String(next).padStart(2, "0")}`;
 }
 
-// The ID becomes a directory name and the LocalAuth clientId, so keep it tame.
+// Validate IDs before using them as directory names and LocalAuth client IDs.
 export function validateAccountId(id, accounts = []) {
   if (!/^[A-Za-z][A-Za-z0-9_-]{1,15}$/.test(id)) {
     return "2-16 chars: letters, digits, - or _, starting with a letter";
@@ -78,11 +57,7 @@ export function buildEntry({ covariates, hostname, ipClass, environment, now = n
   };
 }
 
-// ---------------------------------------------------------------------------
-// Terminal primitives: a redrawable block, and raw-mode key handling
-// ---------------------------------------------------------------------------
-
-// Redraws a multi-line region in place: move up (lines-1), clear, write.
+// Move up, clear and redraw the terminal region.
 function createBlock() {
   let lines = 0;
   return {
@@ -104,8 +79,7 @@ function suspendInput() {
   process.stdin.pause();
 }
 
-// Raw mode stays on between prompts; switched off before the QR wait so
-// Ctrl+C is an ordinary SIGINT there.
+// Disable raw mode before QR authentication so Ctrl+C produces SIGINT.
 function interact(setup) {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin;
@@ -223,16 +197,12 @@ function askConfirm({ label, initial = true, note = "" }) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Screens
-// ---------------------------------------------------------------------------
-
 function banner() {
   const text = "Enroll a study account";
   const w = 48;
   console.log(chalk.cyan(`╭${"─".repeat(w)}╮`));
   console.log(chalk.cyan("│") + chalk.bold(`  ${text}`.padEnd(w)) + chalk.cyan("│"));
-  console.log(chalk.cyan("│") + chalk.dim("  no workload is run · arm is assigned later".padEnd(w)) + chalk.cyan("│"));
+  console.log(chalk.cyan("│") + chalk.dim("  no workload is run · one experiment across hosts".padEnd(w)) + chalk.cyan("│"));
   console.log(chalk.cyan(`╰${"─".repeat(w)}╯`));
 }
 
@@ -267,10 +237,6 @@ const NETWORKS = [
   { label: "Other", value: "other" },
 ];
 
-// ---------------------------------------------------------------------------
-// Linking the phone
-// ---------------------------------------------------------------------------
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LINK_TIMEOUT_MS = 5 * 60_000;
 
@@ -294,7 +260,7 @@ async function linkPhone({ accountId, dataDir, state }) {
   ]);
   const { Client, LocalAuth } = pkg;
 
-  // Same LocalAuth settings as study.js, so the run reuses this session.
+  // Match the measurement adapter's LocalAuth path to reuse this session.
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: accountId, dataPath: dataDir }),
     puppeteer: { headless: true, args: ["--no-sandbox"] },
@@ -353,10 +319,6 @@ async function abort(state) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Main flow
-// ---------------------------------------------------------------------------
-
 function parseArgs(argv) {
   const get = (flag, fallback) => {
     const i = argv.indexOf(flag);
@@ -391,7 +353,6 @@ async function run(args, state) {
 
   const hostLabel = resolveHostLabel(args.host);
 
-  // ---- Step 1: details ----------------------------------------------------
   heading(1, TOTAL, "Account details");
   const accounts = await loadAccounts(args.dryRun);
 
@@ -427,7 +388,6 @@ async function run(args, state) {
     validate: (v) => (v ? null : "Cannot be empty"),
   });
 
-  // ---- Step 2: review -----------------------------------------------------
   heading(2, TOTAL, "Review");
   summary([
     ["Account ID", chalk.cyan.bold(accountId)],
@@ -438,12 +398,11 @@ async function run(args, state) {
     ["Class", accountClass],
     ["Network", ipClass],
     ["Hostname", hostname],
-    ["Arm", chalk.dim("not set — assign.js does this once for the batch")],
+    ["Experiment", chalk.dim("canonical configuration; no assignment needed")],
   ]);
   console.log();
   if (!(await askConfirm({ label: "Link a phone to this account now?" }))) throw new Cancelled();
 
-  // ---- Step 3: link and commit --------------------------------------------
   heading(3, TOTAL, "Link the phone");
 
   let wid;
@@ -468,8 +427,6 @@ async function run(args, state) {
 
   const hash = await hashIdentity(wid);
 
-  // Early duplicate check (the constraint is the real guard), before the
-  // confirmation prompt.
   if (!args.dryRun) {
     const early = await findAccountByIdentityHash(hash);
     if (early) throw new Error(`This phone number is already enrolled as ${early}. One phone, one account ID.`);
@@ -498,11 +455,10 @@ async function run(args, state) {
     return;
   }
 
-  // Network observation at enrollment. If the lookup fails, nothing is
-  // written — an account must not exist without its enrollment observation.
+  // Require the network observation before writing enrollment.
   let networkObs = null;
   try {
-    networkObs = await captureNetwork({ accountId, point: "enrollment" });
+    networkObs = await captureNetwork({ accountId, hostLabel, point: "enrollment" });
   } catch (error) {
     throw new Error(`Enrollment network lookup failed (${error.message}). Nothing was written.`);
   }
@@ -526,11 +482,12 @@ async function run(args, state) {
   console.log(chalk.dim(`  postgres  account row + enrollment network observation`));
   console.log(chalk.dim(`  session   ${path.join(args.dataDir, `session-${accountId}`)}`));
   console.log(chalk.dim("  identity  keyed hash stored; the number itself is not\n"));
-  console.log(`Enroll the remaining accounts, then run ${chalk.cyan("scripts/assign.js")} once for the whole batch.`);
+  console.log("Validate the enrolled account on its assigned host with study.js --dry-run.");
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (!args.dryRun && !process.argv.includes("--authorised-authentication")) throw new Error("Enrollment authentication requires --authorised-authentication; no workload is started");
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error("enroll.js is interactive and needs a terminal.");
@@ -538,7 +495,7 @@ async function main() {
     return;
   }
   if (args.dryRun && !args.fakeWid) {
-    console.error("--dry-run needs --fake-wid, e.g. --fake-wid 233501234567@c.us");
+    console.error("--dry-run needs --fake-wid, using a synthetic test identifier");
     process.exitCode = 1;
     return;
   }

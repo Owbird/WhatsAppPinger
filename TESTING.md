@@ -1,47 +1,62 @@
-# Testing
+# Offline testing
 
-No test here touches WhatsApp. The DB-backed tests need a throwaway Postgres;
-they drop and recreate the `public` schema, so never point them at anything you
-care about.
+No automated test starts a WhatsApp client, scans a QR code or probes identifiers.
+Simulation and measurement share the same runner and state machine. Tests inject
+adapters for latency, transport exceptions, disconnects and clock gaps, and inject
+storage faults around durable operation intents.
 
-## Pure tests (no database)
-
-```bash
-node --test
-```
-
-The DB tests skip themselves when `TEST_DATABASE_URL` is unset.
-
-## Ephemeral Postgres
+## Commands
 
 ```bash
-docker run --rm -d --name wapg-test \
-  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=whatsapppinger_test \
-  -p 5433:5432 postgres:16-alpine
-
-TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5433/whatsapppinger_test node --test
+pnpm check
+node --test tests/*.test.js
 ```
 
-That runs everything: write-once arm enforcement, global identity-hash
-uniqueness, the append-only event log, lease exclusivity, `host_lost` reaping,
-gap flagging and invalidation, "never burst to catch up", and fail-closed at
-start / fail-open mid-run under a simulated database outage.
+Without `TEST_DATABASE_URL`, database tests report explicit skips. CLI tests need
+permission to spawn Node subprocesses. Passing pure tests alone is insufficient
+for accepting schema or persistence changes.
 
-Clean up with `docker rm -f wapg-test`.
-
-## Running the harness against a database
-
-Copy `.env.example` to `.env` and fill it in (`DATABASE_URL`, `DB_SSL_MODE`,
-`HOST_LABEL`, `SINK_CHAT_ID`). Then:
+For the complete suite, use a disposable local PostgreSQL database whose name
+ends in `_test`. The tests refuse other hosts or database names. They recreate
+its schemas and must never use Neon production:
 
 ```bash
-node scripts/migrate.js                 # apply migrations
-node scripts/enroll.js --host local     # interactive; writes one account
-node scripts/assign.js --accounts ... --arms ... --seed N --apply
-node study.js --account A1 --dry-run    # startup checks + plan, no client
-node report.js                          # read-only descriptive report
+docker run --rm -d --name wap-unified-offline-test   -e POSTGRES_PASSWORD=offline-test-only   -e POSTGRES_DB=whatsapppinger_test   -p 127.0.0.1:55439:5432 postgres:16-alpine
+
+TEST_DATABASE_URL=postgres://postgres:offline-test-only@127.0.0.1:55439/whatsapppinger_test   node --test tests/*.test.js
+
+docker stop wap-unified-offline-test
 ```
 
-`scripts/reap.js` marks a lapsed heartbeat as `host_lost`;
-`scripts/resolve.js --account A1 --status confirmed_banned|false_alarm` records
-a human decision on a `halted_pending_review` account.
+## Coverage and fixtures
+
+Configuration tests check canonical hashing, changed-value hashing, original
+counts and timing, recovery rules and explicit T4. Small-count synthetic fixtures
+exercise complete lifecycles quickly; they are never selectable by the CLI and
+never replace the deployed specification.
+
+Runner and session tests cover phase order, recovery, completion, client errors,
+authentication, disconnection, manual interruption, host failure, adjudication,
+terminal restart refusal, identity verification before operation, checkpoint
+corruption, local/database conflicts and final-sync failure. Storage tests place
+faults both before intent persistence and after external execution but before
+completion persistence, then verify that restart issues no repeated operation.
+
+Migration tests build the supplied pre-migration fixture: three enrolled accounts,
+three network observations and six applied migrations, with no runs or assignments.
+They compare all account identity, host, timestamp, environment and covariate
+fields after 0007, and preserve the original migration receipts. A second fixture
+contains nonempty historical assignments, checkpoints, runs, progress, latency,
+rate and import rows to exercise archival dependencies and data retention.
+
+The database lifecycle test uses the same runner, durable state and synchronizer
+across all three account-host bindings. It tests optimistic conflicts, immutable
+identity/host binding, terminal guards, manual adjudication and expired leases.
+Reporting tests distinguish missing values from measured zero, local-copy
+conflicts and historical versus prospective observations. Existing metrics and
+network-classification tests remain.
+
+Tests for arm allocation and the abandoned absolute scheduler were retired with
+those implementations. Their relevant guarantees, including no catch-up bursts,
+append-only events, identity uniqueness and lease exclusivity, belong to the
+unified lifecycle tests. No old experiment is kept executable to satisfy a test.

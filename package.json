@@ -2,17 +2,17 @@
   "name": "WhatsAppPinger",
   "type": "module",
   "version": "2.0.0",
-  "description": "Multi-account, multi-arm measurement harness for WhatsApp's contact-enumeration defenses under browser automation.",
+  "description": "Tiered WhatsApp Web enforcement experiment across independent account-host observations.",
   "main": "study.js",
   "scripts": {
     "study": "node study.js",
-    "assign": "node scripts/assign.js",
     "report": "node report.js",
     "migrate": "node scripts/migrate.js",
     "reap": "node scripts/reap.js",
     "resolve": "node scripts/resolve.js",
     "check": "for f in study.js report.js lib/*.js scripts/*.js tests/*.js; do node --check \"$f\" || exit 1; done",
-    "test": "node --test"
+    "test": "node --test tests/*.test.js",
+    "recover": "node scripts/recover.js"
   },
   "keywords": [],
   "author": "",

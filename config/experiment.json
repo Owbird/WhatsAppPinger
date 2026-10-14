@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "tiers": [
+    {
+      "id": "T0",
+      "count": 50,
+      "intervalMs": 5000,
+      "optional": false
+    },
+    {
+      "id": "T1",
+      "count": 100,
+      "intervalMs": 1800000,
+      "optional": false
+    },
+    {
+      "id": "T2",
+      "count": 6000,
+      "intervalMs": 1000,
+      "optional": false
+    },
+    {
+      "id": "T3",
+      "count": 60000,
+      "intervalMs": 1000,
+      "optional": false
+    },
+    {
+      "id": "T4",
+      "count": 10000,
+      "intervalMs": 100,
+      "optional": true
+    }
+  ],
+  "recovery": {
+    "count": 50,
+    "intervalMs": 5000,
+    "afterEveryTier": true
+  },
+  "optionalT4": {
+    "defaultEnabled": false,
+    "frozenAtRunStart": true
+  },
+  "timing": "response-then-sleep-including-final-operation",
+  "candidateGeneration": {
+    "prefixes": [
+      "020",
+      "050",
+      "023",
+      "024",
+      "025",
+      "053",
+      "054",
+      "055",
+      "059",
+      "026",
+      "027",
+      "056"
+    ],
+    "suffixDigits": 7,
+    "countryCode": "233",
+    "deduplicate": false
+  },
+  "advancement": "workload and recovery both complete without halt",
+  "stop": "first exception, disconnection or authentication failure; no automatic retry",
+  "checkpoint": {
+    "writeIntentBeforeOperation": true,
+    "completionAfterAtomicWrite": true,
+    "restart": "hold-for-scientific-disposition",
+    "neverCatchUp": true
+  },
+  "latency": "successful workload responses only; original running aggregates and ten positional segments",
+  "privacy": "no candidate identifiers, registration answers or raw error messages",
+  "source": {
+    "archiveCommit": "4c3f38dfed110c42d69159efd9a7eb263065e8be",
+    "sha256": {
+      "store.js": "19201c6404ed5dca7358bad800299ee3696ebd4005d7c2eba71bffdc91216917",
+      "study.js": "16d5b2099858ddda34a6024464dd7441d5eca6c9a5f1514f232ea3e17f8e15b4",
+      "tiers.js": "a1e9c737c4f6fdc4d73467d8bc5fa9418ab582dda413f0132b2c84e471777468"
+    }
+  },
+  "gapPolicy": {
+    "flagThresholdMs": 10000,
+    "invalidateThresholdMs": 60000
+  }
+}

@@ -1,68 +1,14 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
-
-import { setPool, closePool } from "../lib/db.js";
-import { prepareRun } from "../lib/startup.js";
-import { Syncer, pushWithRetry } from "../lib/sync.js";
-import { runSchedule } from "../lib/workload.js";
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// A pool stub that behaves like an unreachable database.
-function brokenPool(message = "db down") {
-  return {
-    query() { throw new Error(message); },
-    connect() { throw new Error(message); },
-    end() { return Promise.resolve(); },
-  };
-}
-
-const run = () => ({ id: "1", accountId: "A1", hostLabel: "vps", status: "running", interrupted: false, endedAt: null });
-const store = () => ({ latency: {}, progress: {}, rateMinutes: {}, events: [], network: [] });
-
-test("fail-closed: a database outage stops startup before anything runs", async () => {
-  setPool(brokenPool());
-  let started = false;
-  await assert.rejects(async () => {
-    await prepareRun({ accountId: "A1", hostLabel: "vps" });
-    started = true;
-  }, /db down/);
-  assert.equal(started, false, "nothing ran after the failed check");
-  await closePool();
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {Synchronizer} from '../lib/sync.js';
+import {fixture,subject} from './helpers.js';
+test('database failures remain visible and a failed final flush cannot report success',async()=>{
+ const e=await fixture(),logs=[],status=[];const s=new Synchronizer({experiment:e,push:async()=>{throw new Error('db unavailable');},markFailure:async()=>{},log:m=>logs.push(m),onStatus:async value=>status.push(value)});
+ assert.equal(await s.flush(subject(e)),false);assert.equal(s.status.status,'error');assert.equal(s.status.lastSyncedRevision,null);assert.equal(s.status.errors.length,1);assert.ok(logs.length);
 });
-
-test("fail-open: a mid-run sync failure is reported, never thrown", async () => {
-  setPool(brokenPool());
-  const logs = [];
-  const syncer = new Syncer({ run: run(), store: store(), log: (m) => logs.push(m) });
-  assert.equal(await syncer.pushState(), false);
-  assert.equal(syncer.failures, 1);
-  assert.match(logs[0], /sync to Postgres failed/);
-  await closePool();
-});
-
-test("fail-open: the schedule completes despite every sync failing", async () => {
-  setPool(brokenPool());
-  const syncer = new Syncer({ run: run(), store: store(), log: () => {} });
-  const seen = [];
-  const result = await runSchedule({
-    count: 5,
-    periodMs: 1,
-    scheduleStart: Date.now(),
-    callFn: async (i) => { await syncer.pushState(); seen.push(i); },
-    getHalt: () => null,
-    sleep,
-  });
-  assert.equal(result.halted, null);
-  assert.deepEqual(seen, [0, 1, 2, 3, 4]);
-  await closePool();
-});
-
-test("a halt push retries with backoff then surfaces the failure", async () => {
-  setPool(brokenPool());
-  await assert.rejects(
-    pushWithRetry(run(), store(), { attempts: 2, baseDelayMs: 1 }),
-    /db down/
-  );
-  await closePool();
+test('serialized database synchronization passes optimistic revisions and recovers without losing failure history',async()=>{
+ const e=await fixture(),revisions=[];let fail=true;
+ const sync=new Synchronizer({experiment:e,push:async(s,_e,o)=>{revisions.push(o.expectedRevision);if(fail){fail=false;throw new Error('down');}},markFailure:async()=>{}});
+ const state=subject(e);assert.equal(await sync.flush(state),false);assert.equal(await sync.flush(state),true);assert.equal(sync.status.errors.length,1);state.revision++;
+ assert.equal(await sync.flush(state),true);assert.deepEqual(revisions,[null,null,0]);
 });
