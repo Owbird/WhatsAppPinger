@@ -1,2 +1,3 @@
-onlyBuiltDependencies:
-  - puppeteer
+allowBuilds:
+  puppeteer: true
+  whatsapp-web.js@https://codeload.github.com/pedroslopez/whatsapp-web.js/tar.gz/064a3d5a5a3dce1281a6a12740b5a7051339d154: true
