@@ -9,7 +9,7 @@ let token,state,accountId;
 try{
  accountId=get('--account');const reason=get('--reason');if(!accountId||!/^[a-z][a-z0-9_-]{2,63}$/.test(reason??''))throw new Error('Use --account ID --host HOST --reason NON_IDENTIFYING_CODE [--data-dir DIR]');
  const host=resolveHostLabel(get('--host')),experiment=await loadExperiment();
- const check=await validateExecution({accountId,host,experiment,dataDir:get('--data-dir')??'./data'});
+ const check=await validateExecution({accountId,host,experiment,dataDir:get('--data-dir')??'./data',runId:get('--run')});
  if(!check.state||!check.run)throw new Error('No existing experiment checkpoint to recover');
  state=structuredClone(check.state);token=await acquireRecovery(accountId,host,state.runId);
  if(!FINAL.has(state.status))transition(state,experiment,{type:'stop',signal:'restart',reasonCode:reason});

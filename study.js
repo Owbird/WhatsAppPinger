@@ -8,7 +8,7 @@ import {resolveHostLabel} from './lib/config.js';
 import {checkpointPath,CheckpointStore} from './lib/store.js';
 import {closePool} from './lib/db.js';
 const args=process.argv.slice(2);
-const values=new Set(['--account','--host','--data-dir','--fail-at']);
+const values=new Set(['--account','--host','--data-dir','--fail-at','--run']);
 const flags=new Set(['--simulate','--dry-run','--live']);
 const options={};
 try{
@@ -31,8 +31,8 @@ try{
    console.log(JSON.stringify({state,checkpoint:file},null,2));
  }else{
    const accountId=options['--account'];if(!accountId)throw new Error('An enrolled --account ID is required');
-   const host=resolveHostLabel(options['--host']);const request={accountId,host,experiment,dataDir:options['--data-dir']??'./data'};
-   if(options['--dry-run']){const c=await validateExecution(request);console.log(JSON.stringify({accountId,host,configHash:experiment.hash,canStart:c.canStart,status:c.account.status,checkpointStatus:c.state?.status??null,identityMetadataAvailable:true,authenticatedIdentityVerified:false,readOnly:true},null,2));}
+   const host=resolveHostLabel(options['--host']);const request={accountId,host,experiment,dataDir:options['--data-dir']??'./data',runId:options['--run']??null};
+   if(options['--dry-run']){const c=await validateExecution(request);console.log(JSON.stringify({accountId,host,configHash:experiment.hash,canStart:c.canStart,status:c.account.status,checkpointStatus:c.state?.status??null,runId:c.run?.id??null,replacesRunId:c.run?.replaces_run_id??null,attemptNumber:c.run?.attempt_number??1,checkpoint:c.file,reason:c.run?.replacement_reason??null,identityMetadataAvailable:true,authenticatedIdentityVerified:false,readOnly:true},null,2));}
    else {const result=await executeSession(request);console.log(JSON.stringify({status:result.state.status,synchronization:result.synchronization}));}
  }
 }catch(e){console.error(e.message);process.exitCode=1;}finally{await closePool();}

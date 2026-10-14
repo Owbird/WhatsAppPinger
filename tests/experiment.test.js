@@ -117,3 +117,28 @@ test('read-only validation never starts held or previously observed accounts',as
  const e=await fixture();const result=await validateExecution({accountId:'A01',host:'vps1',experiment:e},{inspect:async()=>({account:{status:'host_lost'},run:null,state:null,previousObservations:[]}),load:async()=>null,identityAvailable:async()=>true});
  assert.equal(result.canStart,false);
 });
+
+test('operation failures log diagnostic fields without messages, stacks or adapter data',async t=>{
+ const e=await fixture();
+ const logs=[];t.mock.method(console,'error',(...args)=>logs.push(args));
+ for(const code of ['AUTH',123]){
+  const state=subject(e);let elapsed=0;
+  await runExperiment({state,experiment:e,adapter:{operation:async()=>{elapsed=17;throw Object.assign(new TypeError('PRIVATE_MESSAGE'),{code,stack:'PRIVATE_STACK',candidate:'PRIVATE_CANDIDATE'});}},persist:async()=>{},latencyNow:()=>elapsed});
+  const [label,json]=logs.at(-1),diagnostic=JSON.parse(json);
+  assert.equal(label,'[OPERATION_FAILURE]');
+  assert.deepEqual(Object.keys(diagnostic),['timestamp','accountId','host','tier','phase','errorName','errorCode','elapsedMs','browserConnected','pageClosed']);
+  assert.ok(Number.isFinite(Date.parse(diagnostic.timestamp)));
+  assert.deepEqual({...diagnostic,timestamp:null},{timestamp:null,accountId:'A01',host:'vps1',tier:'T0',phase:'workload',browserConnected:null,pageClosed:null,errorName:'TypeError',errorCode:typeof code==='string'?code:null,elapsedMs:17});
+  assert.doesNotMatch(json,/PRIVATE/);
+  assert.equal(state.status,code==='AUTH'?'authentication_failed':'halted_pending_review');
+  assert.equal(state.uncertainOperations,1);
+ }
+});
+
+test('a replacement still rejects an authenticated identity mismatch before its first operation',async()=>{
+ const e=await fixture(),stub=stubSession(e,{identityFails:true});
+ const {initialState}=await import('../lib/experiment.js');
+ stub.d.beginRun=async()=>({run:{id:'3'},token:'replacement-token',t4Enabled:false,state:initialState('A01','vps1',e,{runId:'3',attemptNumber:2,replacesRunId:'2'})});
+ await assert.rejects(executeSession({accountId:'A01',host:'vps1',experiment:e,runId:'3',log:()=>{}},stub.d),/incomplete/);
+ assert.deepEqual(stub.order,['identity']);const saved=stub.writes.at(-1).state;assert.equal(saved.replacesRunId,'2');assert.equal(saved.attemptedOperations,0);assert.equal(saved.status,'authentication_failed');
+});
