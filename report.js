@@ -1,110 +1,166 @@
-// computes final descriptive stats
-// from whatever store.js has accumulated for RQ1. Never touches
-// WhatsApp, safe to run while study.js is still going.
+// Descriptive report over all enrolled accounts, read from Postgres. No
+// statistical inference: one account per arm x host cell supports descriptive
+// reporting only. Never touches WhatsApp, so it's safe to run while study.js
+// is active on other accounts.
 //
-// Usage: node report.js [--store study-state.json]
+// Usage: node report.js
 
-import { loadStore } from "./store.js";
-import { TIERS } from "./tiers.js";
-
-const STORE_PATH = "./study-state.json";
-
-// study.js writes aren't atomic, so a read mid-write can catch a truncated
-// file — retry a few times rather than crash on a transient parse error.
-async function safeLoadStore(path, retries = 5) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await loadStore(path);
-    } catch (error) {
-      if (!(error instanceof SyntaxError) || attempt === retries) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
-}
-
-function pct(x) {
-  return x === null ? "-" : `${(x * 100).toFixed(1)}%`;
-}
+import fs from "fs";
+import { loadReportData } from "./lib/repo.js";
+import { closePool } from "./lib/db.js";
+import { approxQuantile, peakRollingWindow } from "./lib/workload.js";
+import { ROLLING_WINDOW_MINUTES } from "./lib/config.js";
+import { STATUS } from "./lib/status.js";
 
 function ms(x) {
   return x === null || x === undefined ? "-" : `${Math.round(x)}ms`;
 }
 
-// Collapse a tier's latency accumulator into the figures RQ1a/RQ1b read from.
-// drift = last-segment mean minus first-segment mean: a large positive drift
-// with no halt is the fingerprint of soft throttling (the account keeps
-// answering, but slower and slower over the course of the tier).
-function latencyStats(lat) {
-  if (!lat || lat.n === 0) return null;
+function readArms(path = "./config/arms.json") {
+  try {
+    return JSON.parse(fs.readFileSync(path, "utf8"));
+  } catch {
+    return { arms: {}, precheck: null };
+  }
+}
+
+// DB latency row -> the shape approxQuantile expects.
+function toLatency(row) {
+  return {
+    n: row.n,
+    min: row.min_ms,
+    max: row.max_ms,
+    sum: row.sum_ms,
+    sumSq: row.sum_sq_ms,
+    histogram: row.histogram ?? [],
+    segments: row.segments ?? [],
+  };
+}
+
+function latencySummary(row) {
+  const lat = toLatency(row);
+  if (!lat.n) return "-";
   const mean = lat.sum / lat.n;
   const sd = Math.sqrt(Math.max(0, lat.sumSq / lat.n - mean * mean));
+  const p50 = approxQuantile(lat, 0.5);
+  const p90 = approxQuantile(lat, 0.9);
   const segMeans = lat.segments.filter((s) => s.n > 0).map((s) => s.sum / s.n);
   const drift = segMeans.length > 1 ? segMeans.at(-1) - segMeans[0] : null;
-  return { mean, sd, min: lat.min, max: lat.max, drift };
+  return `n=${lat.n} mean=${ms(mean)} sd=${ms(sd)} p50=${ms(p50)} p90=${ms(p90)}` +
+    (drift !== null ? ` drift=${drift >= 0 ? "+" : ""}${ms(drift)}` : "");
 }
 
-function reportRQ1(store) {
-  console.log("\n=== RQ1 — defense response by workload tier ===");
-
-  let attempted = 0;
-  let restricted = 0;
-
-  for (const tier of TIERS) {
-    const status = store.rq1.tierStatus[tier.id] ?? "not started";
-    if (status === "not started") continue;
-    attempted++;
-
-    const runHalt = store.events.find((e) => e.scope === "rq1" && e.tier === tier.id && e.phase === "run");
-    const recoveryHalt = store.events.find((e) => e.scope === "rq1" && e.tier === tier.id && e.phase === "recovery");
-
-    const queriesRun = status === "complete"
-      ? tier.count
-      : runHalt
-        ? runHalt.index
-        : (store.rq1.tierProgress?.[tier.id] ?? "in progress");
-    const rate = typeof queriesRun === "number" ? pct(queriesRun / tier.count) : "-";
-
-    let line = `  ${tier.id}: ${status}, ${queriesRun}/${tier.count} queries (${rate})`;
-    if (runHalt) line += `, halted: ${runHalt.signal}`;
-    if (recoveryHalt) line += `, recovery failed: ${recoveryHalt.signal}`;
-
-    const lat = latencyStats(store.rq1.latency?.[tier.id]);
-    if (lat) {
-      line += `\n      latency: mean ${ms(lat.mean)} ±${ms(lat.sd)} (min ${ms(lat.min)}, max ${ms(lat.max)})`;
-      if (lat.drift !== null) {
-        line += `, drift ${lat.drift >= 0 ? "+" : ""}${ms(lat.drift)} across tier`;
-      }
-    }
-    console.log(line);
-
-    if (runHalt || recoveryHalt) restricted++;
+function nominalForArm(arms, arm) {
+  if (arm === "enumeration" && arms.arms?.enumeration?.periodMs) {
+    return `${(60_000 / arms.arms.enumeration.periodMs).toFixed(0)} calls/min (main phase)`;
   }
-
-  console.log(`  Restriction frequency: ${restricted}/${attempted} attempted tiers showed a halt or failed recovery`);
+  if (arm === "messaging" && arms.arms?.messaging?.messagesPerDayTarget) {
+    return `${arms.arms.messaging.messagesPerDayTarget} messages/day (mean)`;
+  }
+  return "n/a";
 }
 
-function reportEvents(store) {
-  if (store.events.length === 0) return;
-
-  console.log("\n=== Event log ===");
-  for (const e of store.events) {
-    const where = e.scope === "rq1" ? ` ${e.tier}/${e.phase}` : "";
-    console.log(`  [${e.timestamp}] ${e.scope}${where}: ${e.signal} (${e.detail})`);
+function groupRate(rateRows) {
+  const byRun = new Map();
+  for (const row of rateRows) {
+    const key = String(row.run_id);
+    if (!byRun.has(key)) byRun.set(key, {});
+    byRun.get(key)[String(new Date(row.minute).getTime())] = row.calls;
   }
+  return byRun;
 }
 
 async function main() {
-  const argv = process.argv.slice(2);
-  const storeIdx = argv.indexOf("--store");
-  const storePath = storeIdx === -1 ? STORE_PATH : argv[storeIdx + 1];
+  const arms = readArms();
+  const { accounts, runs, latency, network, gaps, rate } = await loadReportData();
 
-  const store = await safeLoadStore(storePath);
+  const runsByAccount = new Map();
+  for (const run of runs) {
+    if (!runsByAccount.has(run.account_id)) runsByAccount.set(run.account_id, []);
+    runsByAccount.get(run.account_id).push(run);
+  }
+  const latencyByRun = new Map();
+  for (const row of latency) latencyByRun.set(String(row.run_id), row);
+  const gapByRun = new Map(gaps.map((g) => [String(g.run_id), g.gaps]));
+  const rateByRun = groupRate(rate);
+  const networkByAccount = new Map();
+  for (const obs of network) {
+    if (!networkByAccount.has(obs.account_id)) networkByAccount.set(obs.account_id, []);
+    networkByAccount.get(obs.account_id).push(obs);
+  }
 
-  reportRQ1(store);
-  reportEvents(store);
+  console.log("\n=== Accounts ===");
+  const cells = new Map();
+
+  for (const account of accounts) {
+    const accountRuns = runsByAccount.get(account.id) ?? [];
+    const latest = accountRuns.at(-1) ?? null;
+    const rateMap = latest ? rateByRun.get(String(latest.id)) ?? {} : {};
+    const peak = peakRollingWindow(rateMap, ROLLING_WINDOW_MINUTES);
+
+    const cellKey = `${account.arm ?? "unassigned"} / ${account.host_label}`;
+    if (!cells.has(cellKey)) cells.set(cellKey, []);
+    cells.get(cellKey).push({ account, latest, peak });
+
+    console.log(`\n${account.id}  [${account.arm ?? "unassigned"} / ${account.host_label}]  status: ${account.status}`);
+    const cov = Object.entries(account.covariates ?? {})
+      .filter(([, v]) => v !== null && v !== "")
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    if (cov) console.log(`  covariates: ${cov}`);
+    console.log(`  identity:   ${account.identity_hash ? "keyed hash on file" : "NOT enrolled"}`);
+
+    for (const obs of networkByAccount.get(account.id) ?? []) {
+      const at = new Date(obs.observed_at).toISOString();
+      console.log(`  network ${obs.point.padEnd(10)} ${at}  ${obs.asn ?? "?"} ${obs.org ?? ""} (${obs.country ?? "?"}) hosting=${obs.is_hosting} [${obs.hosting_source}]`);
+    }
+
+    for (const run of accountRuns) {
+      const key = String(run.id);
+      const lat = latencyByRun.get(key);
+      const runRate = rateByRun.get(key) ?? {};
+      const runPeak = peakRollingWindow(runRate, ROLLING_WINDOW_MINUTES);
+      const runGaps = gapByRun.get(key) ?? 0;
+      const flags = [
+        run.status,
+        run.interrupted ? "INTERRUPTED" : null,
+        runGaps ? `${runGaps} gap(s)` : null,
+      ].filter(Boolean).join(" · ");
+      console.log(`  run #${run.id}  ${new Date(run.started_at).toISOString()}  ${flags}`);
+      console.log(`    versions: lib=${run.library_version ?? "?"} puppeteer=${run.puppeteer_version ?? "?"} wweb=${run.wweb_version ?? "?"} clock=${run.clock_source ?? "?"} ${run.clock_offset_ms ?? "?"}ms`);
+      if (lat) {
+        console.log(`    ${lat.phase} latency: ${latencySummary(lat)}`);
+      }
+      console.log(`    peak calls in any ${ROLLING_WINDOW_MINUTES}-min window: ${runPeak} (nominal ${nominalForArm(arms, run.arm)})`);
+    }
+    if (latest && !accountRuns.length) console.log("  (no runs yet)");
+  }
+
+  console.log("\n=== By arm x host ===");
+  for (const [cell, members] of [...cells.entries()].sort()) {
+    const interrupted = members.filter((m) => m.latest?.interrupted).length;
+    const peaks = members.map((m) => m.peak).join(", ");
+    console.log(`  ${cell}: ${members.length} account(s) — peak(s) ${peaks}; interrupted runs ${interrupted}/${members.length}`);
+  }
+
+  console.log("\n=== Outcomes (kept distinct) ===");
+  const byStatus = new Map();
+  for (const account of accounts) {
+    byStatus.set(account.status, (byStatus.get(account.status) ?? 0) + 1);
+  }
+  for (const [status, count] of [...byStatus.entries()].sort()) {
+    const note =
+      status === STATUS.HOST_LOST ? "host asleep/offline/crashed — not necessarily banned" :
+      status === STATUS.HALTED_PENDING_REVIEW ? "WhatsApp-level halt observed — needs a human decision" :
+      status === STATUS.CONFIRMED_BANNED ? "confirmed banned by a human" :
+      status === STATUS.FALSE_ALARM ? "resolved as a false alarm by a human" : "";
+    console.log(`  ${status}: ${count}${note ? `  (${note})` : ""}`);
+  }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  })
+  .finally(closePool);

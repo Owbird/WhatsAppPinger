@@ -4,3 +4,10 @@ node_modules/
 .wwebjs_cache/
 snapshot.json
 study-state.json
+
+# Local-only files. Never committed: the HMAC secret, the connection string,
+# per-account checkpoints/sessions, and the legacy JSON manifest.
+.env
+data/
+config/identity.secret
+config/manifest.json

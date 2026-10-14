@@ -1,0 +1,31 @@
+{
+  "precheck": {
+    "id": "T0",
+    "callType": "isRegisteredUser",
+    "count": 50,
+    "periodMs": 5000
+  },
+  "arms": {
+    "enumeration": {
+      "label": "Enumeration-style workload (replicates the primary run's T2)",
+      "callType": "isRegisteredUser",
+      "numberSource": "ghana-random",
+      "count": 6000,
+      "periodMs": 1000
+    },
+    "messaging": {
+      "label": "Randomised-timing messaging control",
+      "callType": "sendMessage",
+      "target": "sink",
+      "durationHours": 72,
+      "messagesPerDayTarget": 80,
+      "timingModel": "lognormal-daynight",
+      "templateSet": "neutral-smalltalk"
+    },
+    "idle": {
+      "label": "Idle-but-connected control",
+      "callType": "none",
+      "durationHours": 72
+    }
+  }
+}
