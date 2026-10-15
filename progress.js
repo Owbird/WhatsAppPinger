@@ -62,6 +62,13 @@ const date = x =>
 const seconds = x =>
   x == null ? '—' : `${Math.max(0, Math.round(x))}s`;
 
+const percentage = (done, target) =>
+  done == null || target == null || target <= 0
+    ? null
+    : Number((done / target * 100).toFixed(2));
+const formatPercentage = value =>
+  value == null ? '—' : `${value.toFixed(2)}%`;
+
 const pad = (x, n) => String(x ?? '—').padEnd(n);
 
 async function snapshot(experiment, accountFilter) {
@@ -228,6 +235,7 @@ async function snapshot(experiment, accountFilter) {
         phase,
         phaseCompleted: phaseDone,
         phaseTarget,
+        phasePercentComplete: percentage(phaseDone, phaseTarget),
 
         attempted: integer(r.attempted_operations),
         successful: integer(r.successful_operations),
@@ -261,10 +269,17 @@ async function snapshot(experiment, accountFilter) {
           ? {
               workloadCompleted: tierState.completed ?? 0,
               workloadTarget: currentTier.count,
+              workloadPercentComplete: percentage(
+                tierState.completed ?? 0, currentTier.count
+              ),
               recoveryCompleted:
                 tierState.recoveryCompleted ?? 0,
               recoveryTarget:
                 experiment.config.recovery.count,
+              recoveryPercentComplete: percentage(
+                tierState.recoveryCompleted ?? 0,
+                experiment.config.recovery.count
+              ),
               status: tierState.status
             }
           : null
@@ -294,12 +309,13 @@ function render(report) {
     `${pad('Account / Host', 18)} ` +
     `${pad('Status', 24)} ` +
     `${pad('Tier / Phase', 20)} ` +
+    `${pad('Phase done', 11)} ` +
     `${pad('Success', 9)} ` +
     `${pad('Recovery', 9)} ` +
     `${pad('Attempted', 10)} ` +
     `${pad('Uncertain', 10)} Heartbeat`,
 
-    '─'.repeat(126)
+    '─'.repeat(138)
   ];
 
   for (const a of report.accounts) {
@@ -313,6 +329,7 @@ function render(report) {
       `${pad(`${a.accountId} / ${a.host}`, 18)} ` +
       `${pad(a.runStatus ?? a.accountStatus, 24)} ` +
       `${pad(a.tier ? `${a.tier} / ${a.phase}` : 'not started', 20)} ` +
+      `${pad(formatPercentage(a.phasePercentComplete), 11)} ` +
       `${pad(formatNumber(a.successful), 9)} ` +
       `${pad(formatNumber(a.recovery), 9)} ` +
       `${pad(formatNumber(a.attempted), 10)} ` +
@@ -336,10 +353,12 @@ function render(report) {
       lines.push(
         `  ${a.tier}: workload ` +
         `${formatNumber(a.tierProgress.workloadCompleted)}/` +
-        `${formatNumber(a.tierProgress.workloadTarget)}; ` +
+        `${formatNumber(a.tierProgress.workloadTarget)} ` +
+        `(${formatPercentage(a.tierProgress.workloadPercentComplete)}); ` +
         `recovery ` +
         `${formatNumber(a.tierProgress.recoveryCompleted)}/` +
-        `${formatNumber(a.tierProgress.recoveryTarget)}`
+        `${formatNumber(a.tierProgress.recoveryTarget)} ` +
+        `(${formatPercentage(a.tierProgress.recoveryPercentComplete)})`
       );
     }
 
@@ -347,7 +366,8 @@ function render(report) {
       lines.push(
         `  Current ${a.phase}: ` +
         `${formatNumber(a.phaseCompleted)}/` +
-        `${formatNumber(a.phaseTarget)}`
+        `${formatNumber(a.phaseTarget)} ` +
+        `(${formatPercentage(a.phasePercentComplete)})`
       );
     }
 
